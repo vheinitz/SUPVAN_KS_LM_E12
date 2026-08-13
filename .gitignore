@@ -1,0 +1,17 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# Preview / test artifacts
+preview_*.png
+*.png
+
+# The upstream supvan-cups reference (cloned for research; not part of this repo)
+supvan-cups/
+
+# OS / editor
+.DS_Store
+*.swp
+.idea/
+.vscode/
