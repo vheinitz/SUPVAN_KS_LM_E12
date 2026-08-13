@@ -91,7 +91,8 @@ python3 barcode_label.py A4:93:40:02:F3:F5 "S{id:04d}" --from 1 --to 50 \
 ```
 
 The barcode is **Code128** (letters + digits + dashes supported), with the
-human-readable ID printed alongside. It scans from any direction.
+human-readable ID rotated 90° so it runs along the label length (it never
+overlaps the barcode and handles longer IDs). It scans from any direction.
 
 Preview the first label as a PNG (no print):
 
@@ -99,16 +100,34 @@ Preview the first label as a PNG (no print):
 python3 barcode_label.py A4:93:40:02:F3:F5 "S{id:04d}" --from 1 --to 1 --preview
 ```
 
-### Plain text
+> **Note**: a 1D Code128 barcode only fits ~7–8 characters on a 40 mm label
+> at a scannable module width. For longer IDs use the QR-code tool below.
+
+### QR codes for longer IDs / boxes
+
+For 15-char IDs, fridge labels, or tube boxes, a 2D QR code is the right
+choice (a 15-char QR is a compact 21×21-module square):
+
+```bash
+# single 15-char QR code
+python3 qr_label.py A4:93:40:02:F3:F5 "SAMPLE-2024-001" --from 1 --to 1
+
+# series
+python3 qr_label.py A4:93:40:02:F3:F5 "BOX-{id:04d}" --from 1 --to 20
+
+# preview
+python3 qr_label.py A4:93:40:02:F3:F5 "SAMPLE-2024-001" --from 1 --to 1 --preview
+```
+
+The QR code is a square (~11 mm) with the human-readable ID rotated along the
+label length beside it.
+
+### Image / text-only
 
 ```bash
 python3 katasymbol_e12.py print-text A4:93:40:02:F3:F5 "HELLO" \
   --label-width-mm 12 --length-mm 40
-```
 
-### Image / QR
-
-```bash
 python3 katasymbol_e12.py print-image A4:93:40:02:F3:F5 label.png \
   --label-width-mm 12 --length-mm 40
 ```
@@ -144,8 +163,9 @@ asyncio.run(main())
 
 | File | Purpose |
 |------|---------|
-| `katasymbol_e12.py` | Supvan BLE protocol driver + CLI (scan/probe/text/image/QR/dry-run) |
+| `katasymbol_e12.py` | Supvan BLE protocol driver + CLI (scan/probe/text/image/dry-run) |
 | `barcode_label.py` | 1D barcode (Code128) label renderer + series printing |
+| `qr_label.py` | 2D QR-code label renderer + series printing (long IDs) |
 | `barcode_test.py` | Labelled module-width test series (for tuning) |
 | `e12_reverse_lab.py` | Low-level raw send/observe harness (advanced) |
 | `install.sh` | Install Python dependencies |

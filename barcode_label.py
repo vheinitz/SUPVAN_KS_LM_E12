@@ -49,53 +49,72 @@ def make_barcode_module_pattern(code_text: str) -> str:
 
 
 def render_barcode_label(code_text: str, label_width_mm: int = 12,
-                         length_mm: int = 40, module_px: int = 3) -> Image.Image:
-    """Compose a pixel-perfect barcode label, matching render_text()'s
-    proven orientation (landscape canvas + ROTATE_270).
+                         length_mm: int = 40, module_px: int = 3,
+                         text_strip: int = 20) -> Image.Image:
+    """Compose a pixel-perfect barcode label in the printer's final image
+    orientation (96 wide = printhead/12 mm, 320 tall = feed/40 mm).
 
-    Returns a (width x length) image = (12mm*8 x 40mm*8) ready for
-    prepare_print().
+    - Code128 modules run vertically (along the 320 feed); each bar is a
+      HORIZONTAL stripe spanning the barcode band width.
+    - The human text is ROTATED 90 deg so it reads top-to-bottom ALONG the
+      label length, in a narrow strip beside the bars. This lets long IDs
+      (e.g. 15 chars) fit without shrinking.
+
+    Every barcode module is an exact integer number of pixels (no resampling).
     """
-    width = label_width_mm * DOTS_PER_MM      # 96   (printhead / strip)
-    height = length_mm * DOTS_PER_MM          # 320  (feed length)
+    width_px = label_width_mm * DOTS_PER_MM    # 96  (x, printhead)
+    height_px = length_mm * DOTS_PER_MM        # 320 (y, feed)
 
     pattern = make_barcode_module_pattern(code_text)
     modules = len(pattern)
     quiet = 10
     total_modules = modules + 2 * quiet
     module_px = max(2, module_px)
+    if total_modules * module_px > height_px:
+        module_px = max(2, height_px // total_modules)
+    barcode_y = total_modules * module_px
 
-    # Landscape canvas: (height, width) = (320, 96). Modules run along the
-    # 320 axis (horizontal), bars span the 96 axis (vertical stripes).
-    landscape = Image.new("L", (height, width), 255)
-    d = ImageDraw.Draw(landscape)
+    img = Image.new("L", (width_px, height_px), 255)
+    d = ImageDraw.Draw(img)
 
-    bar_len = width - 8                        # bar height across 12mm
-    x0 = (width - bar_len) // 2
-    barcode_w = total_modules * module_px      # modules run along x (320)
-    start_x = (height - barcode_w) // 2
-    x = start_x + quiet * module_px
+    # Barcode band: bars span the left portion; a strip on the right holds the
+    # rotated text.
+    bar_w = width_px - text_strip - 2
+    bar_x0 = 2
+    y_start = (height_px - barcode_y) // 2
+    y = y_start + quiet * module_px
     for m in pattern:
         if m == "1":
-            d.rectangle([x, x0, x + module_px - 1, x0 + bar_len - 1], fill=0)
-        x += module_px
+            d.rectangle([bar_x0, y, bar_x0 + bar_w - 1, y + module_px - 1], fill=0)
+        y += module_px
 
-    # Human-readable ID at the bottom of the landscape (left after rotation).
+    # Human text rotated 90 deg to run along the length (reads top-to-bottom).
     txt = code_text
-    size = 22
+    size = 24
     f = _font(size)
     while size > 8:
         bbox = d.textbbox((0, 0), txt, font=f)
-        tw = bbox[2] - bbox[0]
-        if tw <= height - 8:
+        if bbox[2] - bbox[0] <= height_px - 8:
             break
         size -= 1
         f = _font(size)
     bbox = d.textbbox((0, 0), txt, font=f)
     tw = bbox[2] - bbox[0]
-    d.text(((height - tw) // 2, 2), txt, fill=0, font=f)
+    th = bbox[3] - bbox[1]
+    # Render horizontally, rotate 90: result width = glyph height, height = text
+    # length. Shrink glyphs only if the strip is too narrow.
+    txt_img = Image.new("L", (tw + 4, th + 4), 255)
+    ImageDraw.Draw(txt_img).text((2 - bbox[0], 2 - bbox[1]), txt, fill=0, font=f)
+    rot = txt_img.rotate(90, expand=True)
+    if rot.width > text_strip - 4:
+        s = (text_strip - 4) / rot.width
+        rot = rot.resize((text_strip - 4, max(1, int(rot.height * s))),
+                         Image.Resampling.LANCZOS)
+    ty = (height_px - rot.height) // 2
+    tx = width_px - text_strip + (text_strip - rot.width) // 2
+    img.paste(rot, (tx, ty))
 
-    return landscape.transpose(Image.Transpose.ROTATE_270)
+    return img
 
 
 async def print_series(address: str, template: str, ids,

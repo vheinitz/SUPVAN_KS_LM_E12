@@ -171,6 +171,30 @@ bars spanning the 96-px height), then `ROTATE_270`.
 After this, the user reported: *"now it scans fast and clearly from all
 directions"*.
 
+### 7.4 Text placement (readability without breaking the barcode)
+
+Early layouts drew the plain-text ID **below** the bars, but the label is only
+12 mm wide, so "bars + text stacked" left the text ~3 mm tall and barely
+legible — or, when squished, distorted the barcode. The settled layout rotates
+the human text **90°** so it reads along the 40 mm length in a narrow strip
+beside the bars. This never overlaps the barcode and handles longer IDs.
+
+### 7.5 1D vs 2D: how much data actually fits
+
+A **Code128** symbol for an N-character ID costs roughly 5.5 + 5.5·N modules
+(plus quiet zones). Concrete numbers:
+
+| ID | modules (bars+spaces) | fits on 40 mm at 3 px/module? |
+|----|------------------------|-------------------------------|
+| `S0001` (5) | 79 | yes (297 px ≤ 320) |
+| `ABCDEFGH` (8) | 123 | yes (429 vs 320 → 2 px, borderline) |
+| `SAMPLE-2024-001` (15) | 200 | **no** (needs 660 px) |
+
+The practical ceiling for a scannable 1D barcode on this 40 mm label is ~7–8
+characters. For 15-char IDs (fridges, tube boxes) a **QR code** is the correct
+choice: a 15-char QR is version 1 (21×21 modules) and fits in a 10–11 mm
+square on the 12 mm width. This is implemented in `qr_label.py`.
+
 ---
 
 ## 8. Verification method
@@ -200,6 +224,8 @@ directions"*.
 | 4 | Barcode unscannable | Stretched/resampled bars | Integer-pixel module rendering |
 | 5 | Thin bars | Integer-division collapsed module width | Reserve fixed text strip |
 | 6 | Bars wrong direction + text off-label | Missing `ROTATE_270` | Match `render_text()` orientation |
+| 7 | Text unreadable / barcode squished | Text below bars (12 mm too narrow) | Rotate text 90° along the length |
+| 8 | 15-char IDs don't fit 1D | Code128 too long for 40 mm | Use QR code (`qr_label.py`) |
 
 ---
 
