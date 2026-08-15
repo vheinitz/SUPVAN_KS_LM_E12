@@ -53,6 +53,7 @@ barcode data="S{id:04d}" x=2 y=40 module_px=3 height=88
 
 class PreviewWidget(QtWidgets.QLabel):
     object_moved = QtCore.pyqtSignal(int, str, int)   # index, axis, delta px
+    object_selected = QtCore.pyqtSignal(int)           # index clicked
 
     def __init__(self):
         super().__init__()
@@ -61,9 +62,14 @@ class PreviewWidget(QtWidgets.QLabel):
         self.setStyleSheet("background:#f0f0f0; border:1px solid #999;")
         self._scale = 2
         self._canvas_rect = QtCore.QRect()
+        self._sel_box = None     # (x0,y0,x1,y1) in canvas px
         self._drag_index = None
         self._drag_last = None
         self._hit_fn = lambda x, y: -1
+
+    def set_selection_box(self, box):
+        self._sel_box = box
+        self.update()
 
     def set_preview(self, pil_img: Image.Image):
         big = pil_img.resize((pil_img.width * self._scale, pil_img.height * self._scale),
@@ -73,6 +79,24 @@ class PreviewWidget(QtWidgets.QLabel):
         cw, ch = pil_img.width * self._scale, pil_img.height * self._scale
         self._canvas_rect = QtCore.QRect((self.width() - cw) // 2,
                                          (self.height() - ch) // 2, cw, ch)
+
+    def paintEvent(self, ev):
+        super().paintEvent(ev)
+        if self._sel_box is None:
+            return
+        x0, y0, x1, y1 = self._sel_box
+        x0, x1 = min(x0, x1), max(x0, x1)
+        y0, y1 = min(y0, y1), max(y0, y1)
+        r = self._canvas_rect
+        px0 = r.x() + x0 * self._scale
+        py0 = r.y() + y0 * self._scale
+        px1 = r.x() + (x1 + 1) * self._scale
+        py1 = r.y() + (y1 + 1) * self._scale
+        painter = QtGui.QPainter(self)
+        pen = QtGui.QPen(QtGui.QColor(255, 60, 60), 2, QtCore.Qt.PenStyle.DashLine)
+        painter.setPen(pen)
+        painter.drawRect(QtCore.QRect(int(px0), int(py0), int(px1 - px0), int(py1 - py0)))
+        painter.end()
 
     def _to_px(self, pos):
         r = self._canvas_rect
@@ -85,6 +109,9 @@ class PreviewWidget(QtWidgets.QLabel):
             if idx >= 0:
                 self._drag_index = idx
                 self._drag_last = (x, y)
+                self.object_selected.emit(idx)
+            else:
+                self.object_selected.emit(-1)
         super().mousePressEvent(ev)
 
     def mouseMoveEvent(self, ev):
@@ -155,10 +182,13 @@ class DesignerWindow(QtWidgets.QMainWindow):
         lv.addLayout(addrow)
 
         rmrow = QtWidgets.QHBoxLayout()
-        self.btn_del = QtWidgets.QPushButton("Delete selected")
+        self.btn_del = QtWidgets.QPushButton("Delete")
+        self.btn_copy = QtWidgets.QPushButton("Copy")
+        self.btn_paste = QtWidgets.QPushButton("Paste")
         self.btn_up = QtWidgets.QPushButton("▲")
         self.btn_down = QtWidgets.QPushButton("▼")
-        rmrow.addWidget(self.btn_del); rmrow.addWidget(self.btn_up); rmrow.addWidget(self.btn_down)
+        rmrow.addWidget(self.btn_del); rmrow.addWidget(self.btn_copy)
+        rmrow.addWidget(self.btn_paste); rmrow.addWidget(self.btn_up); rmrow.addWidget(self.btn_down)
         lv.addLayout(rmrow)
 
         lv.addWidget(QtWidgets.QLabel("<b>Properties</b>"))
@@ -208,9 +238,21 @@ class DesignerWindow(QtWidgets.QMainWindow):
         for key, b in self.btn_add.items():
             b.clicked.connect(lambda _, k=key: self._add_object(k))
         self.btn_del.clicked.connect(self._delete_selected)
+        self.btn_copy.clicked.connect(self._copy_selected)
+        self.btn_paste.clicked.connect(self._paste_clipboard)
         self.btn_up.clicked.connect(lambda: self._move_selected(-1))
         self.btn_down.clicked.connect(lambda: self._move_selected(+1))
+        # keyboard shortcuts
+        self._copy_shortcut = QtGui.QShortcut(QtGui.QKeySequence.StandardKey.Copy, self)
+        self._copy_shortcut.activated.connect(self._copy_selected)
+        self._paste_shortcut = QtGui.QShortcut(QtGui.QKeySequence.StandardKey.Paste, self)
+        self._paste_shortcut.activated.connect(self._paste_clipboard)
+        self._del_shortcut = QtGui.QShortcut(QtGui.QKeySequence.StandardKey.Delete, self)
+        self._del_shortcut.activated.connect(self._delete_selected)
+        self._rot_shortcut = QtGui.QShortcut(QtGui.QKeySequence("r"), self)
+        self._rot_shortcut.activated.connect(self._rotate_selected_90)
         self.preview.object_moved.connect(self._on_object_moved)
+        self.preview.object_selected.connect(self._on_preview_select)
         self.sample_spin.valueChanged.connect(self.refresh_all)
         self.markup.textChanged.connect(self._on_markup_edited)
         self.btn_scan.clicked.connect(self._scan)
@@ -263,6 +305,12 @@ class DesignerWindow(QtWidgets.QMainWindow):
                 boxes.append((0,0,10,10))
         self._boxes = boxes
         self.preview._hit_fn = self._hit_test
+        # update selection box if an object is selected
+        idx = getattr(self, "_current_object_index", -1)
+        if 0 <= idx < len(boxes):
+            self.preview.set_selection_box(boxes[idx])
+        else:
+            self.preview.set_selection_box(None)
 
     def _hit_test(self, px, py):
         for i in range(len(self._boxes)-1, -1, -1):
@@ -295,6 +343,25 @@ class DesignerWindow(QtWidgets.QMainWindow):
         idx = cur.data(0, QtCore.Qt.ItemDataRole.UserRole)
         self._current_object_index = idx
         self._build_props(idx)
+        self._update_selection_box()
+
+    def _on_preview_select(self, idx):
+        self._current_object_index = idx
+        # select the matching tree item (no reentrancy)
+        if 0 <= idx < self.tree.topLevelItemCount():
+            self.tree.blockSignals(True)
+            self.tree.setCurrentItem(self.tree.topLevelItem(idx))
+            self.tree.blockSignals(False)
+        if idx >= 0:
+            self._build_props(idx)
+        self._update_selection_box()
+
+    def _update_selection_box(self):
+        idx = getattr(self, "_current_object_index", -1)
+        if 0 <= idx < len(self._boxes):
+            self.preview.set_selection_box(self._boxes[idx])
+        else:
+            self.preview.set_selection_box(None)
 
     def _sync_from_tree_order(self):
         # reorder _template_objects to match tree top-level order
@@ -315,7 +382,15 @@ class DesignerWindow(QtWidgets.QMainWindow):
         k = o.get("type")
         for field, ftype in OBJ_SPECS[k]["fields"]:
             val = o.get(field, "")
-            if ftype == "bool":
+            if field == "rotation":
+                # 90-degree stepped rotation
+                w = QtWidgets.QComboBox()
+                for deg in (0, 90, 180, 270):
+                    w.addItem(f"{deg}°", deg)
+                w.setCurrentIndex(w.findData(int(val) % 360 if val else 0))
+                w.currentIndexChanged.connect(
+                    lambda i, f=field: self._set_prop(idx, f, w.itemData(i)))
+            elif ftype == "bool":
                 w = QtWidgets.QCheckBox(); w.setChecked(bool(val))
                 w.toggled.connect(lambda ch, f=field: self._set_prop(idx, f, ch))
             elif ftype == "b64":
@@ -330,6 +405,11 @@ class DesignerWindow(QtWidgets.QMainWindow):
                 w = QtWidgets.QLineEdit(str(val))
                 w.textChanged.connect(lambda t, f=field: self._set_prop(idx, f, t))
             self.props.addRow(field, w)
+
+        # add a rotate button convenience row
+        rot_btn = QtWidgets.QPushButton("Rotate 90° (shortcut: R)")
+        rot_btn.clicked.connect(lambda: self._rotate_selected_90())
+        self.props.addRow("", rot_btn)
 
     def _set_prop(self, idx, field, val):
         if not (0 <= idx < len(self._template_objects)):
@@ -354,7 +434,43 @@ class DesignerWindow(QtWidgets.QMainWindow):
         idx = getattr(self, "_current_object_index", -1)
         if 0 <= idx < len(self._template_objects):
             del self._template_objects[idx]
+            self._current_object_index = -1
             self.refresh_all()
+
+    def _rotate_selected_90(self):
+        idx = getattr(self, "_current_object_index", -1)
+        if 0 <= idx < len(self._template_objects):
+            o = self._template_objects[idx]
+            cur = o.get("rotation", 0)
+            o["rotation"] = (cur + 90) % 360
+            self._build_props(idx)
+            self._refresh_preview()
+            self._sync_markup()
+            self.status.setText(f"Rotated to {o['rotation']}°")
+
+    def _copy_selected(self):
+        import copy as _copy
+        idx = getattr(self, "_current_object_index", -1)
+        if 0 <= idx < len(self._template_objects):
+            self._clipboard = _copy.deepcopy(self._template_objects[idx])
+            self.status.setText("Copied object to clipboard (paste with Ctrl+V)")
+
+    def _paste_clipboard(self):
+        import copy as _copy
+        if not getattr(self, "_clipboard", None):
+            return
+        idx = getattr(self, "_current_object_index", -1)
+        obj = _copy.deepcopy(self._clipboard)
+        # offset pasted object so it's visible below/right
+        obj["y"] = obj.get("y", 0) + 10
+        if "x" in obj:
+            obj["x"] = obj.get("x", 0) + 10
+        insert_at = idx + 1 if 0 <= idx < len(self._template_objects) else len(self._template_objects)
+        self._template_objects.insert(insert_at, obj)
+        self.refresh_all()
+        self._current_object_index = insert_at
+        self._update_selection_box()
+        self.status.setText("Pasted object")
 
     def _move_selected(self, delta):
         idx = getattr(self, "_current_object_index", -1)
