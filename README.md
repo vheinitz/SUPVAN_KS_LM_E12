@@ -166,10 +166,29 @@ asyncio.run(main())
 | `katasymbol_e12.py` | Supvan BLE protocol driver + CLI (scan/probe/text/image/dry-run) |
 | `barcode_label.py` | 1D barcode (Code128) label renderer + series printing |
 | `qr_label.py` | 2D QR-code label renderer + series printing (long IDs) |
+| `label_designer.py` | PyQt6 GUI designer (live preview, series, templates) |
 | `barcode_test.py` | Labelled module-width test series (for tuning) |
 | `e12_reverse_lab.py` | Low-level raw send/observe harness (advanced) |
 | `install.sh` | Install Python dependencies |
 | `requirements.txt` | Python dependencies |
+
+## GUI label designer
+
+A graphical designer for composing and printing serialized label templates:
+
+```bash
+python3 label_designer.py
+```
+
+Features:
+- Choose **1D Code128** or **2D QR code** symbology
+- Define a **series template** (`S{id:04d}`, `BOX-{id}`, …) with a from/to range
+- **Live preview** of the rendered label
+- Adjust density, barcode module width, text strip, label size
+- **Print the whole series** over BLE in one connection
+- **Save / load** templates as JSON (and auto-restore the last session)
+
+Per-session state is stored in `~/.katasymbol-e12-designer.json`.
 
 ## Troubleshooting
 
