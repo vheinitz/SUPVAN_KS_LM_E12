@@ -122,6 +122,35 @@ python3 qr_label.py A4:93:40:02:F3:F5 "SAMPLE-2024-001" --from 1 --to 1 --previe
 The QR code is a square (~11 mm) with the human-readable ID rotated along the
 label length beside it.
 
+### Multi-object templates (markup + GUI designer)
+
+For labels combining text, lines, boxes, images, barcodes and QR codes, use
+the markup engine or the GUI designer:
+
+```bash
+# GUI: edit markup, drag objects, live preview, print series
+python3 multi_designer.py
+
+# render a markup template to PNG from the CLI
+python3 label_template.py template.txt --id 1 --out label.png
+```
+
+Template markup (one object per line; `#` comments; bare first word is the
+primary field; positions in printer pixels = 96 wide × 320 long):
+
+```
+text   "S{id:04d}" x=6  y=4  size=18 bold
+barcode data="S{id:04d}" x=2 y=40 module_px=3 height=88
+line   x1=0 y1=36 x2=96 y2=36 width=1
+rect   x=2 y=2 w=40 h=20 width=1
+image  path=/tmp/logo.png x=4 y=4 w=40 mode=fit
+qrcode data="SAMPLE-{id}" x=8 y=30 module_px=3
+```
+
+`{id}` (or `{i}`) in any `text`/`data` field is the series number. The GUI
+lets you drag objects with the mouse; positions update in the markup and the
+preview re-renders live.
+
 ### Image / text-only
 
 ```bash
@@ -166,7 +195,9 @@ asyncio.run(main())
 | `katasymbol_e12.py` | Supvan BLE protocol driver + CLI (scan/probe/text/image/dry-run) |
 | `barcode_label.py` | 1D barcode (Code128) label renderer + series printing |
 | `qr_label.py` | 2D QR-code label renderer + series printing (long IDs) |
-| `label_designer.py` | PyQt6 GUI designer (live preview, series, templates) |
+| `label_template.py` | Multi-object template engine (text/line/rect/image/barcode/qr) |
+| `multi_designer.py` | PyQt6 GUI designer (markup + drag + live preview + series) |
+| `label_designer.py` | PyQt6 GUI designer (simple single-symbology series) |
 | `barcode_test.py` | Labelled module-width test series (for tuning) |
 | `e12_reverse_lab.py` | Low-level raw send/observe harness (advanced) |
 | `install.sh` | Install Python dependencies |
