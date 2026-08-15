@@ -6,6 +6,7 @@ __pycache__/
 # Preview / test artifacts
 preview_*.png
 *.png
+template.json
 
 # The upstream supvan-cups reference (cloned for research; not part of this repo)
 supvan-cups/
