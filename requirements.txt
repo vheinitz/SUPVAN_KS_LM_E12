@@ -2,3 +2,5 @@ bleak>=0.22
 pillow>=10.0
 python-barcode>=0.15
 qrcode[pil]>=8.2
+PyQt6>=6.0
+

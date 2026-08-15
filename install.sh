@@ -8,7 +8,8 @@ pip3 install --user --upgrade \
     bleak \
     pillow \
     python-barcode \
-    qrcode
+    qrcode \
+    PyQt6
 
 echo
 echo "Done. Verify your printer is discoverable:"
