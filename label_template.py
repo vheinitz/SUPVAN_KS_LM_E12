@@ -101,21 +101,45 @@ def _draw_rect(d, obj):
         d.rectangle([x, y, x + w, y + h], outline=0, width=width)
 
 
+def _apply_rotation(img: Image.Image, obj) -> Image.Image:
+    """Rotate a rendered object image (with white fill) if requested."""
+    rot = obj.get("rotation", 0)
+    if rot:
+        return img.rotate(rot, expand=True, fillcolor=255, resample=Image.Resampling.NEAREST)
+    return img
+
+
 def _draw_image(d, obj):
-    path = obj.get("path")
-    if not path:
-        return
-    src = Image.open(path).convert("L")
+    import base64
+    import io
     x, y = obj.get("x", 0), obj.get("y", 0)
     w = obj.get("w")
     h = obj.get("h")
     mode = obj.get("mode", "fit")
+    src = None
+    if obj.get("data"):
+        try:
+            src = Image.open(io.BytesIO(base64.b64decode(obj["data"]))).convert("L")
+        except Exception:
+            return
+    elif obj.get("path"):
+        try:
+            src = Image.open(obj["path"]).convert("L")
+        except Exception:
+            return
+    if src is None:
+        return
     if mode == "stretch" and w and h:
-        src = src.resize((w, h))
+        src = src.resize((int(w), int(h)))
     elif w or h:
-        src.thumbnail((w or 10**6, h or 10**6))
-    # paste respecting transparency (use as mask)
-    d.bitmap((x, y), src)
+        src = src.copy()
+        src.thumbnail((int(w) if w else 10**6, int(h) if h else 10**6))
+    src = _apply_rotation(src, obj)
+    mask = src.point(lambda v: 255 if v < 128 else 0)
+    if hasattr(d, "_image"):
+        d._image.paste(0, (int(x), int(y)), mask=mask)
+    else:
+        d.bitmap((int(x), int(y)), src)
 
 
 def _draw_barcode(d, obj):
@@ -125,19 +149,27 @@ def _draw_barcode(d, obj):
     module_px = obj.get("module_px", 3)
     height = obj.get("height", 70)   # bar length along printhead (width)
     pattern = make_barcode_module_pattern(data)
-    cy = y
+    # Render bars + optional text to a temp image so rotation is clean.
+    b_h = len(pattern) * module_px
+    extra = 20 if obj.get("text") else 0
+    tmp = Image.new("L", (height, b_h + extra), 255)
+    td = ImageDraw.Draw(tmp)
+    cy = 0
     for m in pattern:
         if m == "1":
-            d.rectangle([x, cy, x + height - 1, cy + module_px - 1], fill=0)
+            td.rectangle([0, cy, height - 1, cy + module_px - 1], fill=0)
         cy += module_px
     text = obj.get("text")
-    if text is None:
-        return
     if text == "auto":
         text = data
     if text:
-        f = get_font(16)
-        d.text((x, y + (cy - y) + 2), text, font=f, fill=0)
+        td.text((2, b_h + 2), text, font=get_font(14), fill=0)
+    tmp = _apply_rotation(tmp, obj)
+    mask = tmp.point(lambda v: 255 if v < 128 else 0)
+    if hasattr(d, "_image"):
+        d._image.paste(0, (int(x), int(y)), mask=mask)
+    else:
+        d.bitmap((int(x), int(y)), tmp)
 
 
 def _draw_qrcode(d, obj):
@@ -152,7 +184,12 @@ def _draw_qrcode(d, obj):
     qr.add_data(data)
     qr.make(fit=True)
     qim = qr.make_image(fill_color="black", back_color="white").convert("L")
-    d.bitmap((x, y), qim)
+    qim = _apply_rotation(qim, obj)
+    mask = qim.point(lambda v: 255 if v < 128 else 0)
+    if hasattr(d, "_image"):
+        d._image.paste(0, (int(x), int(y)), mask=mask)
+    else:
+        d.bitmap((int(x), int(y)), qim)
 
 
 RENDERERS = {
