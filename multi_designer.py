@@ -136,6 +136,7 @@ class DesignerWindow(QtWidgets.QMainWindow):
         self.resize(1200, 720)
         self._template_objects = []
         self._boxes = []
+        self._last_bitmap_dir = str(Path.home())
         self._build_ui()
         self._connect_signals()
         self._load_config()
@@ -222,11 +223,16 @@ class DesignerWindow(QtWidgets.QMainWindow):
 
         self.btn_preview_png = QtWidgets.QPushButton("Save preview PNG")
         self.btn_import_img = QtWidgets.QPushButton("Import bitmap → base64")
+        self.btn_print_one = QtWidgets.QPushButton("Print 1")
         self.btn_print = QtWidgets.QPushButton("Print series")
         self.btn_print.setStyleSheet("font-weight:bold; padding:6px;")
+        self.btn_print_one.setStyleSheet("font-weight:bold; padding:6px;")
         rv.addWidget(self.btn_import_img)
         rv.addWidget(self.btn_preview_png)
-        rv.addWidget(self.btn_print)
+        print_row = QtWidgets.QHBoxLayout()
+        print_row.addWidget(self.btn_print_one)
+        print_row.addWidget(self.btn_print)
+        rv.addLayout(print_row)
 
         self.status = QtWidgets.QLabel("Ready")
         rv.addWidget(self.status)
@@ -257,6 +263,7 @@ class DesignerWindow(QtWidgets.QMainWindow):
         self.markup.textChanged.connect(self._on_markup_edited)
         self.btn_scan.clicked.connect(self._scan)
         self.btn_print.clicked.connect(self._print_series)
+        self.btn_print_one.clicked.connect(self._print_one)
         self.btn_preview_png.clicked.connect(self._save_preview)
         self.btn_import_img.clicked.connect(self._import_bitmap)
         self.btn_save.clicked.connect(self._save_template)
@@ -396,8 +403,17 @@ class DesignerWindow(QtWidgets.QMainWindow):
             elif ftype == "b64":
                 w = QtWidgets.QLabel("[embedded]" if val else "[none]")
             elif ftype == "path":
+                row = QtWidgets.QWidget()
+                hl = QtWidgets.QHBoxLayout(row)
+                hl.setContentsMargins(0, 0, 0, 0)
                 w = QtWidgets.QLineEdit(str(val))
+                browse = QtWidgets.QPushButton("…")
+                browse.setFixedWidth(28)
                 w.textChanged.connect(lambda t, f=field: self._set_prop(idx, f, t))
+                browse.clicked.connect(lambda _, le=w: self._browse_bitmap(le))
+                hl.addWidget(w, stretch=1)
+                hl.addWidget(browse)
+                w = row
             elif ftype == "int":
                 w = QtWidgets.QSpinBox(); w.setRange(-10000, 100000); w.setValue(int(val or 0))
                 w.valueChanged.connect(lambda v, f=field: self._set_prop(idx, f, v))
@@ -544,11 +560,22 @@ class DesignerWindow(QtWidgets.QMainWindow):
         except Exception as e:
             self.status.setText(f"Scan failed: {e}")
 
-    def _import_bitmap(self):
+    def _browse_bitmap(self, line_edit):
+        start = self._last_bitmap_dir or str(Path.home())
         path, _ = QtWidgets.QFileDialog.getOpenFileName(
-            self, "Import bitmap", "", "Images (*.png *.jpg *.bmp)")
+            self, "Choose bitmap", start, "Images (*.png *.jpg *.jpeg *.bmp *.gif)")
         if not path:
             return
+        self._last_bitmap_dir = str(Path(path).parent)
+        line_edit.setText(path)
+
+    def _import_bitmap(self):
+        start = self._last_bitmap_dir or str(Path.home())
+        path, _ = QtWidgets.QFileDialog.getOpenFileName(
+            self, "Import bitmap", start, "Images (*.png *.jpg *.jpeg *.bmp *.gif)")
+        if not path:
+            return
+        self._last_bitmap_dir = str(Path(path).parent)
         data = base64.b64encode(Path(path).read_bytes()).decode()
         # add an image object with embedded data
         self._template_objects.append({
@@ -569,7 +596,8 @@ class DesignerWindow(QtWidgets.QMainWindow):
         return {"address": self.addr.text(),
                 "objects": self._template_objects,
                 "from": self.from_spin.value(), "to": self.to_spin.value(),
-                "density": self.density.value()}
+                "density": self.density.value(),
+                "last_bitmap_dir": self._last_bitmap_dir}
 
     def _save_template(self):
         path, _ = QtWidgets.QFileDialog.getSaveFileName(
@@ -589,6 +617,8 @@ class DesignerWindow(QtWidgets.QMainWindow):
         self.from_spin.setValue(s.get("from", 1))
         self.to_spin.setValue(s.get("to", 10))
         self.density.setValue(s.get("density", 4))
+        if s.get("last_bitmap_dir"):
+            self._last_bitmap_dir = s["last_bitmap_dir"]
         self.refresh_all(); self.status.setText(f"Loaded {path}")
 
     def _save_config(self):
@@ -603,26 +633,37 @@ class DesignerWindow(QtWidgets.QMainWindow):
                 self.from_spin.setValue(s.get("from", 1))
                 self.to_spin.setValue(s.get("to", 10))
                 self.density.setValue(s.get("density", 4))
+                if s.get("last_bitmap_dir"):
+                    self._last_bitmap_dir = s["last_bitmap_dir"]
             except Exception:
                 pass
 
     def closeEvent(self, ev):
         self._save_config(); super().closeEvent(ev)
 
+    def _print_one(self):
+        n = self._current_id()
+        self._print_ids([n], done_msg=f"Printed {n}")
+
     def _print_series(self):
         start, end = self.from_spin.value(), self.to_spin.value()
         if end < start:
             QtWidgets.QMessageBox.warning(self, "Range", "from > to"); return
+        self._print_ids(list(range(start, end + 1)),
+                        done_msg=f"Series done ({start}…{end})")
+
+    def _print_ids(self, ids, done_msg):
         addr = self.addr.text().strip()
         objs = self._template_objects
         density = self.density.value()
         self.btn_print.setEnabled(False)
+        self.btn_print_one.setEnabled(False)
         self.status.setText("Printing…")
 
         def run():
             async def _run():
                 async with E12Ble(addr) as printer:
-                    for i in range(start, end + 1):
+                    for i in ids:
                         o = [substitute(x, i) for x in objs]
                         img = render_template(o)
                         compressed, speed = prepare_print(img, density)
@@ -634,14 +675,17 @@ class DesignerWindow(QtWidgets.QMainWindow):
             loop = asyncio.new_event_loop(); asyncio.set_event_loop(loop)
             try:
                 loop.run_until_complete(_run())
-                self.status.setText(f"Series done ({start}…{end})")
+                self.status.setText(done_msg)
             except Exception as e:
                 self.status.setText(f"Error: {e}")
 
         t = threading.Thread(target=run, daemon=True); t.start()
         def _poll():
-            if t.is_alive(): QtCore.QTimer.singleShot(200, _poll)
-            else: self.btn_print.setEnabled(True)
+            if t.is_alive():
+                QtCore.QTimer.singleShot(200, _poll)
+            else:
+                self.btn_print.setEnabled(True)
+                self.btn_print_one.setEnabled(True)
         QtCore.QTimer.singleShot(200, _poll)
 
 
