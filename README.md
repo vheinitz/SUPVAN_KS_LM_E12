@@ -164,4 +164,13 @@ For a CUPS queue, use [`heeen/supvan-cups`](https://github.com/heeen/supvan-cups
 
 ## License
 
-MIT, see [LICENSE](LICENSE).
+GPL-3.0, see [LICENSE](LICENSE); the designer GUIs use PyQt6 (GPL).
+
+Parts are ported from MIT-licensed projects, whose notices apply to those parts:
+- dithering and protocol from [`heeen/supvan-cups`](https://github.com/heeen/supvan-cups),
+  Copyright (c) 2026 Florian Hänel
+- `katasymbol_e12.py` and `e12_reverse_lab.py` build on
+  [`eteriall/katasymbol-e12-lab`](https://github.com/eteriall/katasymbol-e12-lab),
+  Copyright (c) 2026 KATASYMBOL E12 Lab contributors
+
+Full license texts: [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
